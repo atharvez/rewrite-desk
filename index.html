@@ -1,0 +1,1957 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rewrite Desk</title>
+
+  <!-- Source Serif 4 — manuscript body text -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300..900;1,8..60,300..900&display=swap" rel="stylesheet" />
+
+  <!--
+    Phase 0.2 — Vendored dependencies (offline-first).
+    vendor/diff.js and vendor/marked.min.js are bundled in this repo.
+    If absent (e.g. a raw git clone without the vendor dir), the inline
+    CDN fallback block below loads from unpkg/jsdelivr automatically.
+  -->
+  <script src="vendor/diff.js"></script>
+  <script src="vendor/marked.min.js"></script>
+  <script>
+    /* CDN fallback — runs synchronously; injects scripts if vendor load failed */
+    (function () {
+      var head = document.head;
+      function inject(src) {
+        var s = document.createElement('script');
+        s.src = src; s.async = false;
+        head.appendChild(s);
+      }
+      if (typeof Diff    === 'undefined') inject('https://unpkg.com/diff@5.2.0/dist/diff.js');
+      if (typeof marked  === 'undefined') inject('https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js');
+    })();
+  </script>
+
+  <style>
+    /* ══════════════════════════════════════════════════════════
+       RESET
+    ══════════════════════════════════════════════════════════ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; color-scheme: dark; }
+
+    /* ══════════════════════════════════════════════════════════
+       DESIGN TOKENS
+    ══════════════════════════════════════════════════════════ */
+    :root {
+      --paper:        #171612;
+      --paper-raised: #211f19;
+      --paper-input:  #1c1a14;
+      --paper-diff:   #1e1c16;
+      --ink:          #e9e4d6;
+      --ink-soft:     #948e79;
+      --ink-ghost:    #5e5a4f;
+      --rule:         #2e2c24;
+      --rule-mid:     #3d3a30;
+      --accent:       #d1935f;
+      --accent-dim:   #a16d3f;
+      --accent-ghost: rgba(209,147,95,0.10);
+      --add-bg:       rgba(80,140,80,0.18);
+      --add-text:     #8ecf8e;
+      --del-bg:       rgba(160,70,70,0.18);
+      --del-text:     #d99090;
+      --serif: 'Source Serif 4', 'Iowan Old Style', Georgia, serif;
+      --mono:  ui-monospace, 'SF Mono', Menlo, Consolas, 'Courier New', monospace;
+      --gap:    1.5rem;
+      --gutter: 3.5rem;
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       BASE
+    ══════════════════════════════════════════════════════════ */
+    body {
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--serif);
+      font-size: 17px;
+      font-weight: 350;
+      line-height: 1.78;
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       TOOLBAR
+    ══════════════════════════════════════════════════════════ */
+    #toolbar {
+      position: sticky; top: 0; z-index: 300;
+      background: var(--paper-raised);
+      border-bottom: 1px solid var(--rule);
+      padding: 0 var(--gap);
+      height: 42px;
+      display: none;
+      align-items: center;
+      gap: 0.5rem;
+      font-family: var(--mono);
+      font-size: 0.70rem;
+    }
+    #toolbar .brand { color: var(--ink-soft); letter-spacing: 0.05em; flex: 0 0 auto; }
+    #toolbar .brand em { font-style: normal; color: var(--accent); }
+    #toolbar .sep  { color: var(--rule-mid); flex: 0 0 auto; }
+    #toolbar .spacer { flex: 1; }
+    #toolbar .autosave { color: var(--ink-ghost); font-size: 0.63rem; }
+
+    /* doc-name button (Phase 1) */
+    .tb-doc-btn {
+      font-family: var(--mono);
+      font-size: 0.70rem;
+      background: transparent;
+      color: var(--ink-soft);
+      border: none;
+      padding: 0.2rem 0.4rem;
+      cursor: pointer;
+      display: flex; align-items: center; gap: 0.3rem;
+      max-width: 180px;
+      flex: 0 1 auto;
+    }
+    .tb-doc-btn:hover { color: var(--ink); }
+    .tb-doc-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .tb-doc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tb-caret { flex: 0 0 auto; opacity: 0.5; font-size: 0.6rem; }
+
+    /* section counter (Phase 3) */
+    .tb-counter {
+      font-family: var(--mono);
+      font-size: 0.63rem;
+      color: var(--ink-ghost);
+      cursor: pointer;
+      padding: 0.1rem 0.35rem;
+      border: 1px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+      flex: 0 0 auto;
+    }
+    .tb-counter:hover { color: var(--ink-soft); border-color: var(--rule-mid); }
+    .tb-counter:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    /* generic toolbar button */
+    .tb-btn {
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      background: transparent;
+      color: var(--ink-soft);
+      border: 1px solid var(--rule-mid);
+      padding: 0.22rem 0.6rem;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+      flex: 0 0 auto;
+      line-height: 1.6;
+    }
+    .tb-btn:hover         { color: var(--ink); border-color: var(--ink-ghost); }
+    .tb-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .tb-btn.danger        { color: var(--del-text); border-color: rgba(217,144,144,0.25); }
+    .tb-btn.danger:hover  { color: #e8a8a8; border-color: rgba(217,144,144,0.6); }
+    .tb-btn.active        { color: var(--accent); border-color: var(--accent); }
+
+    /* ══════════════════════════════════════════════════════════
+       BACKDROP (closes panels on outside click)
+    ══════════════════════════════════════════════════════════ */
+    #backdrop {
+      display: none;
+      position: fixed; inset: 0;
+      z-index: 350;
+      background: rgba(0,0,0,0.35);
+    }
+    #backdrop.open { display: block; }
+
+    /* ══════════════════════════════════════════════════════════
+       DOCUMENT SWITCHER PANEL (Phase 1)
+    ══════════════════════════════════════════════════════════ */
+    #doc-panel {
+      display: none;
+      position: fixed;
+      top: 42px; left: 0;
+      width: 300px;
+      max-height: calc(100vh - 42px);
+      background: var(--paper-raised);
+      border: 1px solid var(--rule-mid);
+      border-top: none;
+      z-index: 400;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #doc-panel.open { display: flex; }
+
+    .dp-header {
+      display: flex; align-items: center;
+      padding: 0.7rem 1rem;
+      border-bottom: 1px solid var(--rule);
+      font-family: var(--mono);
+      font-size: 0.70rem;
+      color: var(--ink-soft);
+      gap: 0.5rem;
+    }
+    .dp-header .dp-title { flex: 1; }
+    .dp-header .dp-close {
+      background: none; border: none; color: var(--ink-ghost);
+      cursor: pointer; font-size: 0.85rem; padding: 0.1rem 0.2rem;
+      line-height: 1;
+    }
+    .dp-header .dp-close:hover { color: var(--ink-soft); }
+    .dp-header .dp-close:focus-visible { outline: 2px solid var(--accent); }
+
+    #dp-list { overflow-y: auto; flex: 1; }
+
+    .dp-item {
+      display: flex; align-items: center;
+      padding: 0.6rem 1rem;
+      border-bottom: 1px solid var(--rule);
+      cursor: pointer;
+      gap: 0.5rem;
+      transition: background 0.12s;
+    }
+    .dp-item:hover { background: rgba(255,255,255,0.03); }
+    .dp-item.current { border-left: 2px solid var(--accent); }
+    .dp-item.current { background: var(--accent-ghost); }
+
+    .dp-item-info { flex: 1; min-width: 0; }
+    .dp-item-name {
+      font-family: var(--mono); font-size: 0.72rem;
+      color: var(--ink); white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .dp-item.current .dp-item-name { color: var(--accent); }
+    .dp-item-meta {
+      font-family: var(--mono); font-size: 0.60rem;
+      color: var(--ink-ghost); margin-top: 0.1rem;
+    }
+    /* inline rename input */
+    .dp-name-input {
+      font-family: var(--mono); font-size: 0.72rem;
+      background: var(--paper-input); color: var(--ink);
+      border: 1px solid var(--accent); outline: none;
+      padding: 0.1rem 0.3rem; width: 100%;
+    }
+
+    .dp-item-acts { display: flex; gap: 0.2rem; flex: 0 0 auto; }
+    .dp-act {
+      background: none; border: none; cursor: pointer;
+      font-family: var(--mono); font-size: 0.65rem;
+      color: var(--ink-ghost); padding: 0.15rem 0.3rem;
+      transition: color 0.12s;
+    }
+    .dp-act:hover { color: var(--ink-soft); }
+    .dp-act.del:hover { color: var(--del-text); }
+    .dp-act:focus-visible { outline: 2px solid var(--accent); }
+
+    .dp-footer {
+      border-top: 1px solid var(--rule);
+      padding: 0.6rem 1rem;
+      display: flex; gap: 0.5rem; flex-wrap: wrap;
+    }
+    .dp-footer-btn {
+      font-family: var(--mono); font-size: 0.68rem;
+      background: transparent; color: var(--ink-soft);
+      border: 1px solid var(--rule-mid); padding: 0.25rem 0.7rem;
+      cursor: pointer; transition: color 0.15s, border-color 0.15s;
+    }
+    .dp-footer-btn:hover { color: var(--ink); border-color: var(--ink-ghost); }
+    .dp-footer-btn:focus-visible { outline: 2px solid var(--accent); }
+
+    /* ══════════════════════════════════════════════════════════
+       STYLE RULES PANEL (Phase 4)
+    ══════════════════════════════════════════════════════════ */
+    #rules-panel {
+      display: none;
+      position: fixed;
+      top: 0; right: 0;
+      width: 380px;
+      height: 100vh;
+      background: var(--paper-raised);
+      border-left: 1px solid var(--rule-mid);
+      z-index: 400;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #rules-panel.open { display: flex; }
+
+    .rp-header {
+      display: flex; align-items: center;
+      padding: 0.8rem 1rem;
+      border-bottom: 1px solid var(--rule);
+      font-family: var(--mono); font-size: 0.72rem;
+      color: var(--ink-soft); gap: 0.5rem; flex: 0 0 auto;
+    }
+    .rp-header .rp-title { flex: 1; color: var(--ink); letter-spacing: 0.04em; }
+    .rp-close {
+      background: none; border: none; color: var(--ink-ghost);
+      cursor: pointer; font-size: 1rem; padding: 0.1rem 0.3rem;
+      line-height: 1; flex: 0 0 auto;
+    }
+    .rp-close:hover { color: var(--ink-soft); }
+    .rp-close:focus-visible { outline: 2px solid var(--accent); }
+
+    .rp-body { flex: 1; overflow-y: auto; padding: 0.8rem 1rem; display: flex; flex-direction: column; gap: 0.8rem; }
+
+    .rp-section-label {
+      font-family: var(--mono); font-size: 0.63rem;
+      color: var(--ink-ghost); margin-bottom: 0.35rem;
+    }
+
+    .rules-json-ta {
+      width: 100%; height: 180px;
+      padding: 0.7rem 0.8rem;
+      font-family: var(--mono); font-size: 0.70rem;
+      line-height: 1.5;
+      background: var(--paper-input); color: var(--ink);
+      border: 1px solid var(--rule-mid);
+      resize: vertical; outline: none;
+      caret-color: var(--accent);
+      transition: border-color 0.18s;
+    }
+    .rules-json-ta:focus { border-color: var(--accent); }
+
+    .rp-error {
+      font-family: var(--mono); font-size: 0.65rem;
+      color: var(--del-text); padding: 0.4rem 0.6rem;
+      background: rgba(160,70,70,0.12); border-left: 2px solid var(--del-text);
+      display: none;
+    }
+    .rp-error.show { display: block; }
+
+    /* active rules list */
+    #rp-rules-list { display: flex; flex-direction: column; gap: 0.4rem; }
+
+    .rule-item {
+      display: flex; align-items: flex-start; gap: 0.7rem;
+      padding: 0.5rem 0.7rem;
+      background: var(--paper); border: 1px solid var(--rule);
+      border-left: 2px solid var(--rule-mid);
+    }
+    .rule-item.enabled { border-left-color: var(--accent); }
+    .rule-item.banned  { border-left-color: var(--del-text); }
+    .rule-item.required { border-left-color: var(--add-text); }
+    .rule-info { flex: 1; min-width: 0; }
+    .rule-msg {
+      font-family: var(--serif); font-size: 0.82rem;
+      color: var(--ink); line-height: 1.4;
+    }
+    .rule-meta {
+      font-family: var(--mono); font-size: 0.58rem;
+      color: var(--ink-ghost); margin-top: 0.2rem;
+      word-break: break-all;
+    }
+
+    /* toggle switch */
+    .rule-toggle { flex: 0 0 auto; margin-top: 0.1rem; }
+    .toggle-input { position: absolute; opacity: 0; width: 0; height: 0; }
+    .toggle-track {
+      display: inline-block; width: 28px; height: 15px;
+      background: var(--rule-mid); border-radius: 8px;
+      cursor: pointer; position: relative; transition: background 0.2s;
+    }
+    .toggle-input:checked + .toggle-track { background: var(--accent); }
+    .toggle-track::after {
+      content: ''; position: absolute;
+      left: 2px; top: 2px;
+      width: 11px; height: 11px;
+      border-radius: 50%;
+      background: var(--paper-raised);
+      transition: transform 0.2s;
+    }
+    .toggle-input:checked + .toggle-track::after { transform: translateX(13px); }
+    .toggle-input:focus-visible + .toggle-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    .rp-footer {
+      border-top: 1px solid var(--rule);
+      padding: 0.7rem 1rem;
+      display: flex; gap: 0.5rem; flex-wrap: wrap; flex: 0 0 auto;
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       MAIN WRAPPER
+    ══════════════════════════════════════════════════════════ */
+    #main {
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 3rem var(--gap) 6rem;
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       INPUT VIEW
+    ══════════════════════════════════════════════════════════ */
+    #input-view { max-width: 640px; margin: 2rem auto 0; }
+
+    .iv-wordmark {
+      font-family: var(--mono); font-size: 0.68rem;
+      letter-spacing: 0.12em; color: var(--accent);
+      margin-bottom: 1rem;
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+    .iv-wordmark::after {
+      content: ''; display: block; height: 1px; width: 2rem;
+      background: var(--accent); opacity: 0.4;
+    }
+    .iv-head {
+      font-family: var(--serif);
+      font-size: clamp(1.6rem, 3.5vw, 2.1rem);
+      font-weight: 350; color: var(--ink);
+      line-height: 1.3; margin-bottom: 0.55rem; letter-spacing: -0.01em;
+    }
+    .iv-sub {
+      font-family: var(--serif); font-size: 0.97rem;
+      color: var(--ink-soft); line-height: 1.65;
+      margin-bottom: 2rem; max-width: 52ch;
+    }
+
+    #input-textarea {
+      width: 100%; min-height: 300px;
+      padding: 1.2rem 1.3rem;
+      font-family: var(--serif); font-size: 1rem; font-weight: 350;
+      line-height: 1.75;
+      background: var(--paper-input); color: var(--ink);
+      border: 1px solid var(--rule-mid);
+      resize: vertical; outline: none;
+      transition: border-color 0.18s; caret-color: var(--accent);
+    }
+    #input-textarea:focus       { border-color: var(--accent); }
+    #input-textarea::placeholder { color: var(--ink-ghost); font-style: italic; }
+
+    .iv-actions {
+      display: flex; align-items: center;
+      gap: 0.75rem; margin-top: 1rem; flex-wrap: wrap;
+    }
+
+    .btn-primary {
+      font-family: var(--mono); font-size: 0.78rem; font-weight: 500;
+      background: var(--accent); color: #1a1108;
+      border: none; padding: 0.55rem 1.4rem; cursor: pointer;
+      letter-spacing: 0.03em; transition: background 0.15s;
+    }
+    .btn-primary:hover        { background: #dfa070; }
+    .btn-primary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+    .btn-ghost {
+      font-family: var(--mono); font-size: 0.76rem;
+      background: transparent; color: var(--ink-soft);
+      border: 1px solid var(--rule-mid); padding: 0.50rem 1.1rem;
+      cursor: pointer; transition: color 0.15s, border-color 0.15s;
+    }
+    .btn-ghost:hover        { color: var(--ink); border-color: var(--ink-ghost); }
+    .btn-ghost:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    #file-input { display: none; }
+    #import-json-input { display: none; }
+
+    /* ══════════════════════════════════════════════════════════
+       EDITOR VIEW
+    ══════════════════════════════════════════════════════════ */
+    #editor-view { display: none; }
+    #sections-list { margin-bottom: 3.5rem; }
+
+    /* rule violation inline message */
+    .merge-blocked-msg {
+      font-family: var(--mono); font-size: 0.70rem;
+      color: var(--del-text); padding: 0.4rem 0.7rem;
+      background: rgba(160,70,70,0.10); border-left: 2px solid var(--del-text);
+      margin-top: 0.6rem; display: none;
+    }
+    .merge-blocked-msg.show { display: block; }
+
+    /* ── Section blocks ──────────────────────────────────────── */
+    .section-block {
+      position: relative;
+      display: grid;
+      grid-template-columns: var(--gutter) 1fr;
+      padding: 0.75rem 0; cursor: pointer;
+      border-left: 2px solid transparent;
+      transition: border-color 0.15s, background 0.15s;
+      content-visibility: auto;
+      contain-intrinsic-size: 0 100px;
+    }
+    .section-block:hover:not(.active) { background: rgba(255,255,255,0.025); }
+    .section-block.edited { border-left-color: var(--accent); }
+    .section-block.active {
+      cursor: default;
+      background: var(--accent-ghost);
+      border-left-color: var(--accent);
+      content-visibility: visible;
+    }
+    /* keyboard focus style (Phase 3) */
+    .section-block:focus {
+      outline: none;
+      background: rgba(209,147,95,0.06);
+    }
+    .section-block.kb-focused:not(.active) {
+      border-left-color: rgba(209,147,95,0.45);
+      background: rgba(209,147,95,0.05);
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      .section-block { transition: border-color 0.18s, background 0.22s; }
+    }
+
+    .section-gutter {
+      display: flex; flex-direction: column;
+      align-items: flex-end; padding-right: 1rem;
+      padding-top: 0.1rem; user-select: none;
+    }
+    .section-num {
+      font-family: var(--mono); font-size: 0.68rem;
+      color: var(--ink-ghost); line-height: 1.78; letter-spacing: 0.03em;
+      transition: color 0.15s;
+    }
+    .section-block.active .section-num { color: var(--accent); }
+    .section-block.edited:not(.active) .section-num { color: var(--accent); opacity: 0.6; }
+    .section-block.kb-focused:not(.active) .section-num { color: rgba(209,147,95,0.7); }
+
+    .edited-pip {
+      width: 4px; height: 4px; border-radius: 50%;
+      background: var(--accent); margin-top: 0.3rem; flex: 0 0 auto;
+    }
+
+    .section-body { min-width: 0; }
+
+    .click-hint {
+      font-family: var(--mono); font-size: 0.62rem;
+      color: var(--ink-ghost); opacity: 0;
+      transition: opacity 0.18s; margin-bottom: 0.2rem; display: block;
+    }
+    .section-block:hover:not(.active) .click-hint { opacity: 1; }
+
+    .section-text { color: var(--ink); max-width: 65ch; }
+
+    /* markdown in read-only view */
+    .md-render p { margin-bottom: 0; }
+    .md-render h1,.md-render h2,.md-render h3,
+    .md-render h4,.md-render h5,.md-render h6 {
+      font-family: var(--serif); font-weight: 600; color: var(--ink);
+      margin-top: 0.3em; margin-bottom: 0.05em; line-height: 1.3;
+    }
+    .md-render h1 { font-size: 1.45em; }
+    .md-render h2 { font-size: 1.20em; }
+    .md-render h3 { font-size: 1.05em; }
+    .md-render strong { font-weight: 600; }
+    .md-render em     { font-style: italic; }
+    .md-render code   { font-family: var(--mono); font-size: 0.84em; background: var(--paper-raised); padding: 0.1em 0.35em; color: var(--ink-soft); }
+    .md-render blockquote { border-left: 2px solid var(--rule-mid); padding-left: 1em; color: var(--ink-soft); margin: 0.4em 0; }
+    .md-render ul,.md-render ol { padding-left: 1.5em; }
+
+    /* ── Edit panel ──────────────────────────────────────────── */
+    .edit-panel { padding-top: 0.6rem; max-width: 65ch; }
+    .ep-label {
+      font-family: var(--mono); font-size: 0.63rem;
+      color: var(--ink-ghost); margin-bottom: 0.35rem;
+      display: flex; align-items: baseline;
+      justify-content: space-between; gap: 0.5rem;
+    }
+    .ep-label .ep-label-name { color: var(--ink-soft); }
+    .ep-label .ep-wc { font-style: italic; }
+
+    .draft-textarea {
+      width: 100%; min-height: 140px;
+      padding: 0.9rem 1rem;
+      font-family: var(--serif); font-size: 1rem; font-weight: 350;
+      line-height: 1.75;
+      background: var(--paper-input); color: var(--ink);
+      border: 1px solid var(--rule-mid);
+      resize: vertical; outline: none;
+      caret-color: var(--accent); transition: border-color 0.18s;
+      margin-bottom: 1.1rem;
+    }
+    .draft-textarea:focus { border-color: var(--accent); }
+
+    .diff-label {
+      font-family: var(--mono); font-size: 0.63rem;
+      color: var(--ink-ghost); margin-bottom: 0.35rem;
+      display: flex; align-items: baseline; justify-content: space-between;
+    }
+    .diff-label .diff-label-name { color: var(--ink-soft); }
+
+    .diff-box {
+      background: var(--paper-diff);
+      border: 1px solid var(--rule); border-left: 2px solid var(--rule-mid);
+      padding: 0.9rem 1rem;
+      font-family: var(--serif); font-size: 1rem; font-weight: 350;
+      line-height: 1.75; color: var(--ink);
+      white-space: pre-wrap; word-break: break-word;
+      margin-bottom: 1rem; min-height: 3.5rem;
+    }
+
+    .no-changes-msg {
+      font-family: var(--mono); font-size: 0.72rem;
+      color: var(--ink-ghost); font-style: italic;
+    }
+
+    .diff-add    {
+      background: var(--add-bg); color: var(--add-text);
+      text-decoration: underline;
+      text-decoration-color: rgba(142,207,142,0.4);
+      text-underline-offset: 2px;
+    }
+    .diff-remove {
+      background: var(--del-bg); color: var(--del-text);
+      text-decoration: line-through;
+      text-decoration-color: rgba(217,144,144,0.7);
+    }
+
+    .ep-actions {
+      display: flex; align-items: center;
+      gap: 0.6rem; flex-wrap: wrap;
+    }
+
+    .btn-merge {
+      font-family: var(--mono); font-size: 0.74rem; font-weight: 500;
+      background: var(--accent); color: #1a1108;
+      border: none; padding: 0.45rem 1.2rem;
+      cursor: pointer; letter-spacing: 0.02em; transition: background 0.15s;
+    }
+    .btn-merge:hover        { background: #dfa070; }
+    .btn-merge:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+    .btn-discard {
+      font-family: var(--mono); font-size: 0.72rem;
+      background: transparent; color: var(--ink-soft);
+      border: 1px solid var(--rule-mid); padding: 0.42rem 1rem;
+      cursor: pointer; transition: color 0.15s, border-color 0.15s;
+    }
+    .btn-discard:hover        { color: var(--ink); border-color: var(--ink-ghost); }
+    .btn-discard:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    .ep-kbd-hint {
+      font-family: var(--mono); font-size: 0.60rem;
+      color: var(--ink-ghost); margin-left: auto;
+    }
+
+    /* ── History panel ───────────────────────────────────────── */
+    .panel-divider { border: none; border-top: 1px solid var(--rule); margin: 2.5rem 0 2rem; }
+
+    .history-heading {
+      font-family: var(--mono); font-size: 0.70rem;
+      color: var(--ink-ghost); letter-spacing: 0.06em;
+      margin-bottom: 1.25rem;
+      display: flex; align-items: center; gap: 0.75rem;
+    }
+    .history-heading::after { content: ''; flex: 1; height: 1px; background: var(--rule); }
+
+    .history-empty {
+      font-family: var(--mono); font-size: 0.75rem;
+      color: var(--ink-ghost); font-style: italic; padding-left: var(--gutter);
+    }
+
+    .history-entry {
+      display: grid; grid-template-columns: var(--gutter) 1fr;
+      margin-bottom: 1.5rem; border-left: 2px solid var(--rule-mid);
+    }
+    .he-gutter {
+      display: flex; flex-direction: column;
+      align-items: flex-end; padding-right: 1rem; padding-top: 0.05rem;
+    }
+    .he-ts {
+      font-family: var(--mono); font-size: 0.60rem;
+      color: var(--ink-ghost); line-height: 1.78; white-space: nowrap;
+      writing-mode: vertical-rl; transform: rotate(180deg); letter-spacing: 0.04em;
+    }
+    .he-body { min-width: 0; }
+    .he-meta {
+      font-family: var(--mono); font-size: 0.65rem;
+      color: var(--ink-ghost); margin-bottom: 0.5rem;
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+    .he-meta .he-right { margin-left: auto; }
+    .he-diff {
+      font-family: var(--serif); font-size: 0.92rem; font-weight: 350;
+      line-height: 1.68; white-space: pre-wrap; word-break: break-word; color: var(--ink);
+    }
+
+    .btn-undo {
+      font-family: var(--mono); font-size: 0.62rem;
+      background: transparent; color: var(--ink-ghost);
+      border: 1px solid var(--rule-mid); padding: 0.15rem 0.55rem;
+      cursor: pointer; transition: color 0.15s, border-color 0.15s;
+    }
+    .btn-undo:hover        { color: var(--ink-soft); border-color: var(--ink-ghost); }
+    .btn-undo:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    /* ── Toast ───────────────────────────────────────────────── */
+    #toast {
+      position: fixed; bottom: 1.75rem; right: 1.75rem;
+      background: var(--paper-raised); border: 1px solid var(--rule-mid);
+      color: var(--ink-soft); font-family: var(--mono); font-size: 0.72rem;
+      padding: 0.55rem 1.1rem; opacity: 0; pointer-events: none;
+      transition: opacity 0.2s; z-index: 999; max-width: 300px;
+    }
+    #toast.show { opacity: 1; }
+
+    /* ── Scrollbar ───────────────────────────────────────────── */
+    ::-webkit-scrollbar       { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: var(--paper); }
+    ::-webkit-scrollbar-thumb { background: var(--rule-mid); }
+
+    /* ── Reduced motion ──────────────────────────────────────── */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+    }
+
+    /* ── Responsive ──────────────────────────────────────────── */
+    @media (max-width: 560px) {
+      :root { --gutter: 2.2rem; }
+      body  { font-size: 16px; }
+      #main { padding: 1.5rem 1rem 4rem; }
+      #rules-panel { width: 100%; }
+      #doc-panel   { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Toolbar ────────────────────────────────────────────────── -->
+<div id="toolbar">
+  <span class="brand">Rewrite<em>Desk</em></span>
+  <span class="sep">·</span>
+  <!-- Phase 1: doc switcher button -->
+  <button class="tb-doc-btn" id="tb-doc-btn"
+          onclick="UI.toggleDocPanel()"
+          aria-haspopup="listbox" aria-expanded="false"
+          title="Switch document">
+    <span class="tb-doc-name" id="tb-docname">untitled</span>
+    <span class="tb-caret" aria-hidden="true">▾</span>
+  </button>
+  <!-- Phase 3: section counter -->
+  <span class="tb-counter" id="tb-counter"
+        style="display:none" role="button" tabindex="0"
+        title="Click to scroll to current section"
+        onclick="UI.scrollToFocused()"
+        onkeydown="if(event.key==='Enter')UI.scrollToFocused()"></span>
+  <span class="spacer"></span>
+  <span class="autosave" id="tb-autosave">saved</span>
+  <!-- Phase 4: rules button -->
+  <button class="tb-btn" id="tb-rules-btn"
+          onclick="UI.toggleRulesPanel()"
+          title="Edit style-guide rules for this document">Style rules</button>
+  <button class="tb-btn" onclick="App.exportDoc('txt')" title="Export as plain text">↓ .txt</button>
+  <button class="tb-btn" onclick="App.exportDoc('md')"  title="Export as Markdown">↓ .md</button>
+  <button class="tb-btn danger" onclick="App.deleteCurrentDoc()" title="Delete this document">✕ delete</button>
+</div>
+
+<!-- Phase 1: doc-switcher panel -->
+<div id="doc-panel" role="listbox" aria-label="Documents">
+  <div class="dp-header">
+    <span class="dp-title">Documents</span>
+    <button class="dp-close" onclick="UI.closeDocPanel()" aria-label="Close document switcher">✕</button>
+  </div>
+  <div id="dp-list"></div>
+  <div class="dp-footer">
+    <button class="dp-footer-btn" onclick="App.newDocument()">+ New document</button>
+    <button class="dp-footer-btn" onclick="document.getElementById('import-json-input').click()">Import JSON</button>
+    <button class="dp-footer-btn" onclick="App.exportDocJSON()">Export JSON</button>
+    <input type="file" id="import-json-input" accept=".json" onchange="App.importDocJSON(event)" />
+  </div>
+</div>
+
+<!-- Phase 4: rules panel -->
+<div id="rules-panel" role="dialog" aria-label="Style rules editor" aria-modal="true">
+  <div class="rp-header">
+    <span class="rp-title">Style rules</span>
+    <button class="rp-close" onclick="UI.closeRulesPanel()" aria-label="Close style rules panel">✕</button>
+  </div>
+  <div class="rp-body">
+    <div>
+      <div class="rp-section-label">Rules JSON — edit directly, then click Apply</div>
+      <textarea class="rules-json-ta" id="rules-json-ta" spellcheck="false"
+                oninput="UI.validateRulesJSON()" aria-label="Rules JSON editor"></textarea>
+      <div class="rp-error" id="rp-error"></div>
+    </div>
+    <div>
+      <div class="rp-section-label">Active rules</div>
+      <div id="rp-rules-list"></div>
+    </div>
+  </div>
+  <div class="rp-footer">
+    <button class="btn-primary" onclick="App.applyRules()" style="font-size:0.74rem;padding:0.4rem 1rem;">Apply rules</button>
+    <button class="btn-ghost"   onclick="App.resetRulesToDefaults()" style="font-size:0.72rem;padding:0.38rem 0.9rem;">Reset to defaults</button>
+  </div>
+</div>
+
+<!-- Backdrop — closes any open panel on click -->
+<div id="backdrop" onclick="UI.closeAll()"></div>
+
+<!-- ── Main container ────────────────────────────────────────── -->
+<div id="main">
+
+  <!-- INPUT VIEW -->
+  <div id="input-view">
+    <p class="iv-wordmark" aria-hidden="true">Rewrite Desk</p>
+    <h1 class="iv-head">Your words,<br>not the machine's.</h1>
+    <p class="iv-sub">Paste or upload any AI-generated document. Rewrite each section by hand. Every change is tracked, diffed, and exportable.</p>
+
+    <textarea
+      id="input-textarea"
+      placeholder="Paste your document here, or start typing…
+
+Blank lines between paragraphs create separate sections."
+      aria-label="Document text"
+    ></textarea>
+
+    <div class="iv-actions">
+      <button class="btn-primary" onclick="App.openDocument()">Open document →</button>
+      <button class="btn-ghost"   onclick="document.getElementById('file-input').click()">Upload .txt / .md</button>
+      <input type="file" id="file-input" accept=".txt,.md" onchange="App.handleFileUpload(event)" />
+    </div>
+  </div>
+
+  <!-- EDITOR VIEW -->
+  <div id="editor-view">
+    <div id="sections-list"></div>
+    <hr class="panel-divider" />
+    <div id="history-panel">
+      <p class="history-heading" role="heading" aria-level="2">Merge history</p>
+      <div id="history-list"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Toast -->
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+'use strict';
+
+/* ════════════════════════════════════════════════════════════════
+   CONSTANTS
+════════════════════════════════════════════════════════════════ */
+const STORAGE_V1 = 'rewrite-desk-v1';
+const STORAGE_V2 = 'rewrite-desk-v2';
+
+const DEFAULT_RULES = [
+  {
+    id: 'no-allcaps', kind: 'banned',
+    pattern: '\\b[A-Z]{4,}\\b',
+    message: 'Avoid ALL CAPS words (4+ letters).',
+    enabled: true,
+  },
+  {
+    id: 'no-emoji', kind: 'banned',
+    pattern: '[\\u{1F300}-\\u{1FFFF}]',
+    flags: 'u',
+    message: 'Avoid emojis.',
+    enabled: true,
+  },
+  {
+    id: 'no-exclaim-triple', kind: 'banned',
+    pattern: '!{3,}',
+    message: 'Avoid three or more consecutive exclamation marks.',
+    enabled: true,
+  },
+];
+
+/* ════════════════════════════════════════════════════════════════
+   UTILITIES
+════════════════════════════════════════════════════════════════ */
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+function wordCount(text) {
+  if (!text || !text.trim()) return 0;
+  return text.trim().split(/\s+/).length;
+}
+
+function normalizeText(raw) {
+  return raw
+    .replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    .replace(/[ \t]+$/gm, '').trimEnd();
+}
+
+function splitIntoSections(text) {
+  const n = normalizeText(text);
+  const parts = n.split(/\n{2,}/).map(p => p.trim()).filter(p => p.length > 0);
+  return parts.length > 0 ? parts : [n.trim()];
+}
+
+function formatTime(iso) {
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, {
+    month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+}
+
+function formatTimeShort(iso) {
+  const d = new Date(iso);
+  const now = new Date();
+  const diff = now - d;
+  if (diff < 60000) return 'just now';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function escapeHtml(str) {
+  return str
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/* ════════════════════════════════════════════════════════════════
+   DIFF ENGINE
+════════════════════════════════════════════════════════════════ */
+function buildDiffHTML(oldText, newText) {
+  if (typeof Diff === 'undefined') {
+    return '<span class="no-changes-msg">diff library not loaded — check internet connection</span>';
+  }
+  const changes = Diff.diffWordsWithSpace(oldText, newText);
+  let hasChange = false, html = '';
+  for (const part of changes) {
+    const safe = escapeHtml(part.value).replace(/\n/g, '<br>');
+    if (part.added) {
+      html += `<span class="diff-add" aria-label="inserted">${safe}</span>`;
+      hasChange = true;
+    } else if (part.removed) {
+      html += `<span class="diff-remove" aria-label="deleted">${safe}</span>`;
+      hasChange = true;
+    } else {
+      html += safe;
+    }
+  }
+  return hasChange ? html : '<span class="no-changes-msg">No changes from current text.</span>';
+}
+
+/* ════════════════════════════════════════════════════════════════
+   STYLE RULES VALIDATION (Phase 4)
+════════════════════════════════════════════════════════════════ */
+function checkStyleRules(draft) {
+  const doc = Doc();
+  if (!doc || !Array.isArray(doc.rules) || doc.rules.length === 0) return null;
+  for (const rule of doc.rules) {
+    if (!rule.enabled || !rule.pattern) continue;
+    try {
+      const re = new RegExp(rule.pattern, rule.flags || '');
+      if (rule.kind === 'banned'   &&  re.test(draft)) return rule.message;
+      if (rule.kind === 'required' && !re.test(draft)) return rule.message;
+    } catch (_) { /* skip invalid regex */ }
+  }
+  return null;
+}
+
+function validateRulesJSON(json) {
+  try {
+    const rules = JSON.parse(json);
+    if (!Array.isArray(rules)) return 'Rules must be a JSON array.';
+    for (const r of rules) {
+      if (!r.id || !r.kind || !r.pattern || !r.message)
+        return `Rule missing required field (id, kind, pattern, message). Rule: ${JSON.stringify(r).slice(0, 60)}`;
+      if (r.kind !== 'banned' && r.kind !== 'required')
+        return `Rule "${r.id}": kind must be "banned" or "required".`;
+      try { new RegExp(r.pattern, r.flags || ''); }
+      catch (e) { return `Rule "${r.id}": invalid regex — ${e.message}`; }
+    }
+    return null;
+  } catch (e) {
+    return `JSON syntax error: ${e.message}`;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════
+   STATE (Phase 1: multi-document)
+════════════════════════════════════════════════════════════════ */
+const state = {
+  currentDocId: null,
+  documents: {},       // { [docId]: DocObject }
+  view: 'input',       // 'input' | 'editor'
+  focusedIdx: -1,      // Phase 3: keyboard-focused section index (transient)
+  _docPanelOpen: false,
+  _rulesPanelOpen: false,
+  _rulesDraftJSON: '',  // unsaved draft in rules editor
+};
+
+/* ── Doc helper ─────────────────────────────────────────────── */
+function Doc() {
+  return state.currentDocId ? (state.documents[state.currentDocId] || null) : null;
+}
+
+function makeDoc(name, sections, history, activeId, draft, rules) {
+  const now = new Date().toISOString();
+  return {
+    id:        uid(),
+    name:      name || 'Untitled',
+    createdAt: now,
+    updatedAt: now,
+    sections:  sections  || [],
+    history:   history   || [],
+    activeId:  activeId  || null,
+    draft:     draft     || '',
+    rules:     rules     || DEFAULT_RULES.map(r => Object.assign({}, r)),
+  };
+}
+
+/* ════════════════════════════════════════════════════════════════
+   STORAGE + MIGRATION (Phase 1)
+════════════════════════════════════════════════════════════════ */
+let saveTimer = null;
+
+function persistState() {
+  clearTimeout(saveTimer);
+  setAutosaveLabel('saving…');
+  saveTimer = setTimeout(() => {
+    try {
+      const payload = {
+        currentDocId: state.currentDocId,
+        documents:    state.documents,
+      };
+      localStorage.setItem(STORAGE_V2, JSON.stringify(payload));
+      setAutosaveLabel('saved');
+    } catch (e) {
+      setAutosaveLabel('save failed');
+    }
+  }, 400);
+}
+
+function restoreState() {
+  /* Try v2 first */
+  try {
+    const raw = localStorage.getItem(STORAGE_V2);
+    if (raw) {
+      const saved = JSON.parse(raw);
+      state.currentDocId = saved.currentDocId || null;
+      state.documents    = saved.documents    || {};
+      return true;
+    }
+  } catch (_) {}
+
+  /* Migrate from v1 → v2 (Phase 1: schema migration) */
+  try {
+    const v1raw = localStorage.getItem(STORAGE_V1);
+    if (v1raw) {
+      const v1 = JSON.parse(v1raw);
+      if (v1.sections && v1.sections.length > 0) {
+        const doc = makeDoc(
+          v1.fileName || 'Migrated document',
+          v1.sections,
+          v1.history  || [],
+          v1.activeId || null,
+          v1.draft    || '',
+          DEFAULT_RULES.map(r => Object.assign({}, r))
+        );
+        state.documents[doc.id] = doc;
+        state.currentDocId = doc.id;
+        /* persist new format immediately so migration doesn't repeat */
+        localStorage.setItem(STORAGE_V2, JSON.stringify({
+          currentDocId: state.currentDocId,
+          documents:    state.documents,
+        }));
+        return true;
+      }
+    }
+  } catch (_) {}
+
+  return false;
+}
+
+function setAutosaveLabel(text) {
+  const el = document.getElementById('tb-autosave');
+  if (el) el.textContent = text;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   RENDERING — SECTIONS
+════════════════════════════════════════════════════════════════ */
+function renderSections() {
+  const list = document.getElementById('sections-list');
+  list.innerHTML = '';
+  const doc = Doc();
+  if (!doc) return;
+  doc.sections.forEach((sec, idx) => list.appendChild(buildSectionBlock(sec, idx)));
+  updateCounter();
+}
+
+function buildSectionBlock(sec, idx) {
+  const doc      = Doc();
+  const isActive = doc && doc.activeId === sec.id;
+  const isKbFoc  = state.focusedIdx === idx;
+
+  const block = document.createElement('div');
+  block.className = [
+    'section-block',
+    sec.edited  ? 'edited'    : '',
+    isActive    ? 'active'    : '',
+    isKbFoc && !isActive ? 'kb-focused' : '',
+  ].filter(Boolean).join(' ');
+  block.dataset.id  = sec.id;
+  block.dataset.idx = idx;
+
+  if (!isActive) {
+    block.setAttribute('tabindex', '0');
+    block.setAttribute('role', 'button');
+    block.setAttribute('aria-label', `Section ${idx + 1}${sec.edited ? ', edited' : ''}. Press Enter to edit.`);
+    block.addEventListener('click',   () => App.activateSection(sec.id));
+    block.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); App.activateSection(sec.id); }
+    });
+    block.addEventListener('focus', () => {
+      state.focusedIdx = idx;
+      updateCounter();
+      document.querySelectorAll('.section-block.kb-focused').forEach(el => {
+        if (el !== block) el.classList.remove('kb-focused');
+      });
+      block.classList.add('kb-focused');
+    });
+  }
+
+  /* gutter */
+  const gutter = document.createElement('div');
+  gutter.className = 'section-gutter';
+  gutter.setAttribute('aria-hidden', 'true');
+  const numEl = document.createElement('span');
+  numEl.className = 'section-num';
+  numEl.textContent = String(idx + 1).padStart(2, ' ');
+  gutter.appendChild(numEl);
+  if (sec.edited && !isActive) {
+    const pip = document.createElement('span');
+    pip.className = 'edited-pip'; pip.title = 'This section has been edited';
+    gutter.appendChild(pip);
+  }
+  block.appendChild(gutter);
+
+  /* body */
+  const body = document.createElement('div');
+  body.className = 'section-body';
+
+  if (isActive) {
+    body.appendChild(buildEditPanel(sec));
+  } else {
+    const hint = document.createElement('span');
+    hint.className = 'click-hint'; hint.setAttribute('aria-hidden', 'true');
+    hint.textContent = 'Click to edit this section';
+    body.appendChild(hint);
+    body.appendChild(buildReadView(sec));
+  }
+  block.appendChild(body);
+  return block;
+}
+
+function buildReadView(sec) {
+  const wrap = document.createElement('div');
+  wrap.className = 'section-text';
+  if (typeof marked !== 'undefined') {
+    try {
+      const md = document.createElement('div');
+      md.className = 'md-render';
+      md.innerHTML = marked.parse(sec.currentText, { breaks: false, gfm: true });
+      wrap.appendChild(md);
+    } catch (_) { wrap.textContent = sec.currentText; }
+  } else {
+    wrap.textContent = sec.currentText;
+  }
+  return wrap;
+}
+
+function buildEditPanel(sec) {
+  const doc   = Doc();
+  const panel = document.createElement('div');
+  panel.className = 'edit-panel';
+
+  /* draft label */
+  const draftLabel = document.createElement('div');
+  draftLabel.className = 'ep-label';
+  draftLabel.setAttribute('aria-hidden', 'true');
+  draftLabel.innerHTML = '<span class="ep-label-name">Your rewrite</span><span class="ep-wc" id="wc-draft"></span>';
+  panel.appendChild(draftLabel);
+
+  /* textarea */
+  const textarea = document.createElement('textarea');
+  textarea.className = 'draft-textarea'; textarea.id = 'active-textarea';
+  textarea.value = (doc.draft !== null && doc.draft !== undefined) ? doc.draft : sec.currentText;
+  textarea.setAttribute('spellcheck', 'true');
+  textarea.setAttribute('aria-label', 'Draft rewrite for this section');
+  panel.appendChild(textarea);
+
+  /* diff label + box */
+  const diffLabel = document.createElement('div');
+  diffLabel.className = 'diff-label'; diffLabel.setAttribute('aria-hidden', 'true');
+  diffLabel.innerHTML = `<span class="diff-label-name">Diff from original</span><span>${wordCount(sec.currentText)} words in original</span>`;
+  panel.appendChild(diffLabel);
+
+  const diffBox = document.createElement('div');
+  diffBox.className = 'diff-box'; diffBox.id = 'active-diff';
+  diffBox.setAttribute('aria-label', 'Word-level diff preview');
+  diffBox.innerHTML = buildDiffHTML(sec.currentText, textarea.value);
+  panel.appendChild(diffBox);
+
+  /* rule violation message (Phase 4) */
+  const ruleMsg = document.createElement('div');
+  ruleMsg.className = 'merge-blocked-msg'; ruleMsg.id = 'rule-violation-msg';
+  panel.appendChild(ruleMsg);
+
+  /* action row */
+  const acts = document.createElement('div');
+  acts.className = 'ep-actions';
+
+  const mergeBtn = document.createElement('button');
+  mergeBtn.className = 'btn-merge'; mergeBtn.textContent = 'Merge change';
+  mergeBtn.onclick = () => App.mergeSection(sec.id);
+
+  const discardBtn = document.createElement('button');
+  discardBtn.className = 'btn-discard'; discardBtn.textContent = 'Discard';
+  discardBtn.onclick = () => App.discardSection();
+
+  const kbd = document.createElement('span');
+  kbd.className = 'ep-kbd-hint'; kbd.setAttribute('aria-hidden', 'true');
+  kbd.textContent = 'Ctrl+↵  merge  ·  Esc  discard';
+
+  acts.appendChild(mergeBtn); acts.appendChild(discardBtn); acts.appendChild(kbd);
+  panel.appendChild(acts);
+
+  /* live diff (debounced 150ms) */
+  let diffTimer = null;
+  textarea.addEventListener('input', () => {
+    clearTimeout(diffTimer);
+    diffTimer = setTimeout(() => {
+      const val = textarea.value;
+      doc.draft = val;
+      persistState();
+      const wcEl = document.getElementById('wc-draft');
+      if (wcEl) {
+        const wc = wordCount(val), orig = wordCount(sec.currentText), d = wc - orig;
+        wcEl.textContent = `${wc} words (${d >= 0 ? '+' : ''}${d})`;
+      }
+      const diffEl = document.getElementById('active-diff');
+      if (diffEl) diffEl.innerHTML = buildDiffHTML(sec.currentText, val);
+      /* live rule feedback */
+      const violation = checkStyleRules(val);
+      const msgEl = document.getElementById('rule-violation-msg');
+      if (msgEl) {
+        msgEl.textContent = violation ? `Style rule: ${violation}` : '';
+        msgEl.classList.toggle('show', !!violation);
+      }
+    }, 150);
+  });
+
+  setTimeout(() => {
+    const domTA = document.getElementById('active-textarea');
+    if (!domTA) return;
+    /* run once to populate counters */
+    const val = domTA.value;
+    const wcEl = document.getElementById('wc-draft');
+    if (wcEl) {
+      const wc = wordCount(val), orig = wordCount(sec.currentText), d = wc - orig;
+      wcEl.textContent = `${wc} words (${d >= 0 ? '+' : ''}${d})`;
+    }
+    domTA.focus();
+    domTA.setSelectionRange(domTA.value.length, domTA.value.length);
+  }, 20);
+
+  return panel;
+}
+
+function refreshSection(id) {
+  const container = document.getElementById('sections-list');
+  const old = container.querySelector(`[data-id="${id}"]`);
+  if (!old) { renderSections(); return; }
+  const idx = parseInt(old.dataset.idx, 10);
+  const doc = Doc();
+  const sec = doc && doc.sections.find(s => s.id === id);
+  if (!sec) return;
+  container.replaceChild(buildSectionBlock(sec, idx), old);
+}
+
+/* ════════════════════════════════════════════════════════════════
+   RENDERING — HISTORY
+════════════════════════════════════════════════════════════════ */
+function renderHistory() {
+  const list = document.getElementById('history-list');
+  if (!list) return;
+  const doc = Doc();
+  if (!doc || doc.history.length === 0) {
+    list.innerHTML = '<p class="history-empty">No merges yet — edits will appear here after you commit a change.</p>';
+    return;
+  }
+  list.innerHTML = '';
+  doc.history.forEach((entry, i) => {
+    const secIdx     = doc.sections.findIndex(s => s.id === entry.sectionId);
+    const displayNum = secIdx >= 0 ? secIdx + 1 : entry.sectionIdx + 1;
+    const el  = document.createElement('div'); el.className = 'history-entry';
+    const heg = document.createElement('div'); heg.className = 'he-gutter'; heg.setAttribute('aria-hidden','true');
+    const ts  = document.createElement('span'); ts.className = 'he-ts'; ts.textContent = formatTime(entry.ts);
+    heg.appendChild(ts); el.appendChild(heg);
+    const heb  = document.createElement('div'); heb.className = 'he-body';
+    const meta = document.createElement('div'); meta.className = 'he-meta';
+    const left = document.createElement('span'); left.textContent = `Section ${displayNum}`;
+    meta.appendChild(left);
+    if (i === 0) {
+      const right = document.createElement('span'); right.className = 'he-right';
+      const undoBtn = document.createElement('button'); undoBtn.className = 'btn-undo';
+      undoBtn.textContent = '↩ undo'; undoBtn.setAttribute('aria-label', 'Undo last merge');
+      undoBtn.onclick = () => App.undoLastMerge();
+      right.appendChild(undoBtn); meta.appendChild(right);
+    }
+    heb.appendChild(meta);
+    const diffEl = document.createElement('div'); diffEl.className = 'he-diff';
+    diffEl.innerHTML = buildDiffHTML(entry.fromText, entry.toText);
+    heb.appendChild(diffEl); el.appendChild(heb); list.appendChild(el);
+  });
+}
+
+/* ════════════════════════════════════════════════════════════════
+   RENDERING — DOC SWITCHER (Phase 1)
+════════════════════════════════════════════════════════════════ */
+function renderDocPanel() {
+  const list = document.getElementById('dp-list');
+  list.innerHTML = '';
+  const docs = Object.values(state.documents)
+    .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+
+  if (docs.length === 0) {
+    list.innerHTML = '<div style="padding:0.8rem 1rem;font-family:var(--mono);font-size:0.70rem;color:var(--ink-ghost);">No documents yet.</div>';
+    return;
+  }
+
+  docs.forEach(doc => {
+    const isCurrent = doc.id === state.currentDocId;
+    const item = document.createElement('div');
+    item.className = 'dp-item' + (isCurrent ? ' current' : '');
+    item.dataset.docId = doc.id;
+    item.setAttribute('role', 'option');
+    item.setAttribute('aria-selected', String(isCurrent));
+
+    /* info block */
+    const info = document.createElement('div'); info.className = 'dp-item-info';
+
+    const nameEl = document.createElement('div'); nameEl.className = 'dp-item-name';
+    nameEl.textContent = doc.name || 'Untitled';
+    info.appendChild(nameEl);
+
+    const meta = document.createElement('div'); meta.className = 'dp-item-meta';
+    const sCount = doc.sections ? doc.sections.length : 0;
+    const hCount = doc.history  ? doc.history.length  : 0;
+    meta.textContent = `${sCount} sections · ${hCount} merges · ${formatTimeShort(doc.updatedAt)}`;
+    info.appendChild(meta);
+
+    /* click to switch */
+    info.addEventListener('click', () => {
+      if (!isCurrent) App.switchDoc(doc.id);
+      else UI.closeDocPanel();
+    });
+    item.appendChild(info);
+
+    /* action buttons */
+    const acts = document.createElement('div'); acts.className = 'dp-item-acts';
+
+    const renameBtn = document.createElement('button');
+    renameBtn.className = 'dp-act'; renameBtn.textContent = '✎';
+    renameBtn.title = 'Rename'; renameBtn.setAttribute('aria-label', `Rename "${doc.name}"`);
+    renameBtn.onclick = (e) => { e.stopPropagation(); startRenameInPanel(doc.id, nameEl); };
+    acts.appendChild(renameBtn);
+
+    const exportBtn = document.createElement('button');
+    exportBtn.className = 'dp-act'; exportBtn.textContent = '↓';
+    exportBtn.title = 'Export as JSON'; exportBtn.setAttribute('aria-label', `Export "${doc.name}" as JSON`);
+    exportBtn.onclick = (e) => { e.stopPropagation(); App.exportDocJSONById(doc.id); };
+    acts.appendChild(exportBtn);
+
+    if (!isCurrent || Object.keys(state.documents).length > 1) {
+      const delBtn = document.createElement('button');
+      delBtn.className = 'dp-act del'; delBtn.textContent = '✕';
+      delBtn.title = 'Delete'; delBtn.setAttribute('aria-label', `Delete "${doc.name}"`);
+      delBtn.onclick = (e) => { e.stopPropagation(); App.deleteDoc(doc.id); };
+      acts.appendChild(delBtn);
+    }
+
+    item.appendChild(acts);
+    list.appendChild(item);
+  });
+}
+
+function startRenameInPanel(docId, nameEl) {
+  const currentName = state.documents[docId]?.name || '';
+  const input = document.createElement('input');
+  input.className = 'dp-name-input'; input.type = 'text';
+  input.value = currentName; input.setAttribute('aria-label', 'New document name');
+  nameEl.replaceWith(input);
+  input.focus(); input.select();
+
+  const commit = () => {
+    const newName = input.value.trim() || currentName;
+    App.renameDoc(docId, newName);
+    input.replaceWith(nameEl);
+    nameEl.textContent = newName;
+  };
+  input.addEventListener('blur',    commit);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') { input.replaceWith(nameEl); }
+  });
+}
+
+/* ════════════════════════════════════════════════════════════════
+   RENDERING — RULES PANEL (Phase 4)
+════════════════════════════════════════════════════════════════ */
+function renderRulesPanel() {
+  const doc = Doc();
+  const rules = doc ? (doc.rules || []) : [];
+
+  /* populate JSON textarea */
+  const ta = document.getElementById('rules-json-ta');
+  if (ta) {
+    ta.value = JSON.stringify(rules, null, 2);
+    state._rulesDraftJSON = ta.value;
+  }
+
+  /* clear error */
+  const errEl = document.getElementById('rp-error');
+  if (errEl) { errEl.textContent = ''; errEl.classList.remove('show'); }
+
+  /* render rules list */
+  renderRulesList(rules);
+}
+
+function renderRulesList(rules) {
+  const list = document.getElementById('rp-rules-list');
+  if (!list) return;
+  list.innerHTML = '';
+
+  if (!rules || rules.length === 0) {
+    list.innerHTML = '<div style="font-family:var(--mono);font-size:0.70rem;color:var(--ink-ghost);">No rules defined.</div>';
+    return;
+  }
+
+  rules.forEach((rule, i) => {
+    const item = document.createElement('div');
+    item.className = [
+      'rule-item',
+      rule.enabled ? 'enabled' : '',
+      rule.kind === 'banned'   ? 'banned'   : '',
+      rule.kind === 'required' ? 'required' : '',
+    ].filter(Boolean).join(' ');
+
+    const info = document.createElement('div'); info.className = 'rule-info';
+    const msg  = document.createElement('div'); msg.className  = 'rule-msg';
+    msg.textContent = rule.message;
+    const meta = document.createElement('div'); meta.className = 'rule-meta';
+    meta.textContent = `${rule.kind}  /  /${rule.pattern}/${rule.flags || ''}`;
+    info.appendChild(msg); info.appendChild(meta);
+    item.appendChild(info);
+
+    /* toggle */
+    const togWrap = document.createElement('label');
+    togWrap.className = 'rule-toggle';
+    togWrap.title = rule.enabled ? 'Disable rule' : 'Enable rule';
+    const togInput = document.createElement('input');
+    togInput.type = 'checkbox'; togInput.className = 'toggle-input';
+    togInput.checked = !!rule.enabled;
+    togInput.setAttribute('aria-label', `Toggle rule: ${rule.message}`);
+    togInput.addEventListener('change', () => {
+      rule.enabled = togInput.checked;
+      item.classList.toggle('enabled', rule.enabled);
+      /* sync to JSON textarea */
+      const ta = document.getElementById('rules-json-ta');
+      const doc = Doc();
+      if (ta && doc) ta.value = JSON.stringify(doc.rules, null, 2);
+    });
+    const togTrack = document.createElement('span'); togTrack.className = 'toggle-track';
+    togWrap.appendChild(togInput); togWrap.appendChild(togTrack);
+    item.appendChild(togWrap);
+    list.appendChild(item);
+  });
+}
+
+/* ════════════════════════════════════════════════════════════════
+   SECTION COUNTER (Phase 3)
+════════════════════════════════════════════════════════════════ */
+function updateCounter() {
+  const el = document.getElementById('tb-counter');
+  if (!el) return;
+  const doc = Doc();
+  if (!doc || doc.sections.length === 0) { el.style.display = 'none'; return; }
+  const total = doc.sections.length;
+  let current = '—';
+  if (doc.activeId) {
+    const idx = doc.sections.findIndex(s => s.id === doc.activeId);
+    if (idx >= 0) current = idx + 1;
+  } else if (state.focusedIdx >= 0 && state.focusedIdx < total) {
+    current = state.focusedIdx + 1;
+  }
+  el.textContent = `${current} / ${total}`;
+  el.style.display = 'inline';
+}
+
+/* ════════════════════════════════════════════════════════════════
+   VIEW SWITCHING
+════════════════════════════════════════════════════════════════ */
+function switchView(view) {
+  state.view = view;
+  const toolbar    = document.getElementById('toolbar');
+  const inputView  = document.getElementById('input-view');
+  const editorView = document.getElementById('editor-view');
+
+  if (view === 'editor') {
+    toolbar.style.display    = 'flex';
+    inputView.style.display  = 'none';
+    editorView.style.display = 'block';
+    const doc = Doc();
+    document.getElementById('tb-docname').textContent = doc ? doc.name : 'untitled';
+    renderSections();
+    renderHistory();
+    updateCounter();
+  } else {
+    toolbar.style.display    = 'none';
+    inputView.style.display  = 'block';
+    editorView.style.display = 'none';
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════
+   UI (panel helpers, Phase 1 + Phase 4)
+════════════════════════════════════════════════════════════════ */
+const UI = {
+  toggleDocPanel() {
+    if (state._docPanelOpen) this.closeDocPanel();
+    else this.openDocPanel();
+  },
+  openDocPanel() {
+    renderDocPanel();
+    document.getElementById('doc-panel').classList.add('open');
+    document.getElementById('backdrop').classList.add('open');
+    document.getElementById('tb-doc-btn').setAttribute('aria-expanded', 'true');
+    state._docPanelOpen = true;
+  },
+  closeDocPanel() {
+    document.getElementById('doc-panel').classList.remove('open');
+    document.getElementById('backdrop').classList.remove('open');
+    document.getElementById('tb-doc-btn').setAttribute('aria-expanded', 'false');
+    state._docPanelOpen = false;
+  },
+
+  toggleRulesPanel() {
+    if (state._rulesPanelOpen) this.closeRulesPanel();
+    else this.openRulesPanel();
+  },
+  openRulesPanel() {
+    renderRulesPanel();
+    document.getElementById('rules-panel').classList.add('open');
+    document.getElementById('backdrop').classList.add('open');
+    document.getElementById('tb-rules-btn').classList.add('active');
+    state._rulesPanelOpen = true;
+    setTimeout(() => { const ta = document.getElementById('rules-json-ta'); if (ta) ta.focus(); }, 50);
+  },
+  closeRulesPanel() {
+    document.getElementById('rules-panel').classList.remove('open');
+    document.getElementById('backdrop').classList.remove('open');
+    document.getElementById('tb-rules-btn').classList.remove('active');
+    state._rulesPanelOpen = false;
+  },
+
+  closeAll() {
+    this.closeDocPanel();
+    this.closeRulesPanel();
+  },
+
+  /* Phase 3: scroll to active/focused section */
+  scrollToFocused() {
+    const doc = Doc();
+    if (!doc) return;
+    const id = doc.activeId || (state.focusedIdx >= 0 ? doc.sections[state.focusedIdx]?.id : null);
+    if (id) {
+      const el = document.querySelector(`[data-id="${id}"]`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  },
+
+  /* live validation in rules textarea */
+  validateRulesJSON() {
+    const ta    = document.getElementById('rules-json-ta');
+    const errEl = document.getElementById('rp-error');
+    if (!ta || !errEl) return;
+    const err = validateRulesJSON(ta.value);
+    if (err) {
+      errEl.textContent = err; errEl.classList.add('show');
+    } else {
+      errEl.textContent = ''; errEl.classList.remove('show');
+      /* live-update rule list preview */
+      try {
+        const rules = JSON.parse(ta.value);
+        renderRulesList(rules);
+      } catch (_) {}
+    }
+  },
+};
+
+/* ════════════════════════════════════════════════════════════════
+   TOAST
+════════════════════════════════════════════════════════════════ */
+let toastTimer = null;
+function toast(msg, duration = 2800) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), duration);
+}
+
+/* ════════════════════════════════════════════════════════════════
+   APP ACTIONS
+════════════════════════════════════════════════════════════════ */
+const App = {
+
+  /* ── Input ──────────────────────────────────────────────────── */
+  openDocument() {
+    const text = document.getElementById('input-textarea').value.trim();
+    if (!text) { toast('Please paste or type some text first.'); return; }
+    this._loadText(text, 'document');
+  },
+
+  handleFileUpload(event) {
+    const file = event.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => this._loadText(e.target.result, file.name);
+    reader.readAsText(file, 'utf-8');
+    event.target.value = '';
+  },
+
+  _loadText(text, fileName) {
+    const parts = splitIntoSections(text);
+    const name  = fileName.replace(/\.(txt|md)$/i, '');
+    const doc   = makeDoc(
+      name,
+      parts.map(t => ({ id: uid(), originalText: t, currentText: t, edited: false })),
+      [], null, '',
+      DEFAULT_RULES.map(r => Object.assign({}, r))
+    );
+    state.documents[doc.id] = doc;
+    state.currentDocId      = doc.id;
+    state.focusedIdx        = -1;
+    switchView('editor');
+    persistState();
+    toast(`"${name}" — ${parts.length} section${parts.length !== 1 ? 's' : ''}`);
+  },
+
+  /* ── Section editing ────────────────────────────────────────── */
+  activateSection(id) {
+    const doc = Doc(); if (!doc) return;
+    if (doc.activeId === id) return;
+    const prev = doc.activeId;
+    doc.activeId = id;
+    const sec = doc.sections.find(s => s.id === id);
+    doc.draft = sec ? sec.currentText : '';
+    state.focusedIdx = doc.sections.findIndex(s => s.id === id);
+    if (prev) refreshSection(prev);
+    refreshSection(id);
+    updateCounter();
+    persistState();
+  },
+
+  mergeSection(id) {
+    const doc = Doc(); if (!doc) return;
+    const sec = doc.sections.find(s => s.id === id); if (!sec) return;
+    const draft = doc.draft;
+
+    /* empty guard */
+    if (draft.trim() === '') {
+      const ok = confirm(
+        `Section ${doc.sections.indexOf(sec) + 1}: the draft is empty.\n` +
+        'Merging will remove this section from the exported document. Continue?'
+      );
+      if (!ok) return;
+    }
+
+    /* no-change guard */
+    if (draft === sec.currentText) {
+      this.discardSection(); toast('No changes — nothing to merge.'); return;
+    }
+
+    /* style rule guard (Phase 4) */
+    const violation = checkStyleRules(draft);
+    if (violation) {
+      toast(`Style rule blocked merge: ${violation}`, 4000); return;
+    }
+
+    /* commit */
+    doc.history.unshift({
+      id: uid(), ts: new Date().toISOString(),
+      sectionId: id, sectionIdx: doc.sections.indexOf(sec),
+      fromText: sec.currentText, toText: draft,
+    });
+    sec.currentText = draft;
+    sec.edited      = (draft !== sec.originalText);
+    doc.activeId    = null;
+    doc.draft       = '';
+    doc.updatedAt   = new Date().toISOString();
+
+    renderSections(); renderHistory();
+    persistState();
+    toast(`Section ${doc.sections.indexOf(sec) + 1} merged.`);
+  },
+
+  discardSection() {
+    const doc = Doc(); if (!doc) return;
+    const prev = doc.activeId;
+    doc.activeId = null; doc.draft = '';
+    if (prev) refreshSection(prev);
+    updateCounter(); persistState();
+  },
+
+  /* ── Undo ───────────────────────────────────────────────────── */
+  undoLastMerge() {
+    const doc = Doc(); if (!doc || doc.history.length === 0) { toast('Nothing to undo.'); return; }
+    const entry = doc.history[0];
+    const sec   = doc.sections.find(s => s.id === entry.sectionId);
+    if (!sec) { toast('Section no longer exists.'); doc.history.shift(); renderHistory(); return; }
+    sec.currentText = entry.fromText;
+    sec.edited      = (entry.fromText !== sec.originalText);
+    doc.history.shift();
+    if (doc.activeId === sec.id) { doc.activeId = null; doc.draft = ''; }
+    doc.updatedAt = new Date().toISOString();
+    renderSections(); renderHistory(); persistState();
+    toast('Last merge undone.');
+  },
+
+  /* ── Export text ────────────────────────────────────────────── */
+  exportDoc(ext) {
+    const doc = Doc(); if (!doc) return;
+    const text = doc.sections.map(s => s.currentText).filter(t => t.trim()).join('\n\n');
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = `${doc.name}.${ext}`;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+    toast(`Exported as ${doc.name}.${ext}`);
+  },
+
+  /* ── Phase 1: Multi-doc library ─────────────────────────────── */
+
+  newDocument() {
+    UI.closeDocPanel();
+    switchView('input');
+    document.getElementById('input-textarea').value = '';
+    state.currentDocId = null;
+    state.focusedIdx   = -1;
+    toast('Ready for a new document.');
+  },
+
+  switchDoc(docId) {
+    if (!state.documents[docId]) return;
+    state.currentDocId = docId;
+    state.focusedIdx   = -1;
+    const doc = Doc();
+    if (doc) doc.activeId = null;
+    UI.closeDocPanel();
+    switchView('editor');
+    persistState();
+    toast(`Switched to "${state.documents[docId].name}".`);
+  },
+
+  renameDoc(docId, newName) {
+    const doc = state.documents[docId]; if (!doc) return;
+    doc.name      = newName;
+    doc.updatedAt = new Date().toISOString();
+    if (docId === state.currentDocId) {
+      document.getElementById('tb-docname').textContent = newName;
+    }
+    persistState();
+    toast(`Renamed to "${newName}".`);
+  },
+
+  deleteDoc(docId) {
+    const doc = state.documents[docId]; if (!doc) return;
+    const ok = confirm(`Delete "${doc.name}"? This cannot be undone.`);
+    if (!ok) return;
+    delete state.documents[docId];
+    if (state.currentDocId === docId) {
+      /* switch to another doc or go to input */
+      const remaining = Object.values(state.documents)
+        .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+      if (remaining.length > 0) {
+        state.currentDocId = remaining[0].id;
+        UI.closeDocPanel();
+        switchView('editor');
+      } else {
+        state.currentDocId = null;
+        UI.closeDocPanel();
+        switchView('input');
+      }
+    } else {
+      UI.closeDocPanel();
+      renderDocPanel();
+    }
+    persistState();
+    toast(`"${doc.name}" deleted.`);
+  },
+
+  deleteCurrentDoc() {
+    const doc = Doc(); if (!doc) return;
+    this.deleteDoc(doc.id);
+  },
+
+  /* Per-doc JSON export */
+  exportDocJSON() {
+    const doc = Doc(); if (!doc) return;
+    this.exportDocJSONById(doc.id);
+  },
+
+  exportDocJSONById(docId) {
+    const doc = state.documents[docId]; if (!doc) return;
+    const payload = JSON.stringify({ version: 2, doc }, null, 2);
+    const blob = new Blob([payload], { type: 'application/json;charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = `${doc.name}.state.json`;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+    toast(`Exported state as ${doc.name}.state.json`);
+  },
+
+  /* Per-doc JSON import (Phase 2) */
+  importDocJSON(event) {
+    const file = event.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const payload = JSON.parse(e.target.result);
+        const raw = payload.version === 2 ? payload.doc : payload;
+        if (!raw || !Array.isArray(raw.sections)) throw new Error('Invalid document state file.');
+        /* assign a fresh id to avoid collisions */
+        const doc = Object.assign({}, raw, {
+          id:        uid(),
+          createdAt: raw.createdAt || new Date().toISOString(),
+          updatedAt: raw.updatedAt || new Date().toISOString(),
+          rules:     Array.isArray(raw.rules) ? raw.rules : DEFAULT_RULES.map(r => Object.assign({}, r)),
+          activeId:  null,
+          draft:     '',
+        });
+        state.documents[doc.id] = doc;
+        state.currentDocId = doc.id;
+        state.focusedIdx   = -1;
+        UI.closeDocPanel();
+        switchView('editor');
+        persistState();
+        toast(`Imported "${doc.name}" — ${doc.sections.length} sections, ${doc.history.length} merges.`);
+      } catch (err) {
+        toast(`Import failed: ${err.message}`, 5000);
+      }
+    };
+    reader.readAsText(file, 'utf-8');
+    event.target.value = '';
+  },
+
+  /* ── Phase 4: Rules management ──────────────────────────────── */
+  applyRules() {
+    const ta = document.getElementById('rules-json-ta'); if (!ta) return;
+    const err = validateRulesJSON(ta.value);
+    if (err) { toast(`Rules not saved — fix error first: ${err}`, 5000); return; }
+    const doc = Doc(); if (!doc) return;
+    doc.rules     = JSON.parse(ta.value);
+    doc.updatedAt = new Date().toISOString();
+    persistState();
+    renderRulesPanel();
+    toast('Style rules saved.');
+  },
+
+  resetRulesToDefaults() {
+    const ok = confirm('Reset rules to the built-in defaults? Your custom rules will be lost.');
+    if (!ok) return;
+    const doc = Doc(); if (!doc) return;
+    doc.rules     = DEFAULT_RULES.map(r => Object.assign({}, r));
+    doc.updatedAt = new Date().toISOString();
+    persistState();
+    renderRulesPanel();
+    toast('Rules reset to defaults.');
+  },
+};
+
+/* ════════════════════════════════════════════════════════════════
+   KEYBOARD SHORTCUTS
+   Phase 3 additions: J / K / L (section navigation)
+════════════════════════════════════════════════════════════════ */
+document.addEventListener('keydown', e => {
+  /* Always-on shortcuts */
+  const doc = Doc();
+
+  /* Ctrl+Enter → merge (when section is active) */
+  if (doc && doc.activeId && (e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    e.preventDefault(); App.mergeSection(doc.activeId); return;
+  }
+
+  /* Esc → discard (when section is active) */
+  if (doc && doc.activeId && e.key === 'Escape') {
+    const focused = document.activeElement;
+    if (focused && focused.id === 'input-textarea') return;
+    e.preventDefault(); App.discardSection(); return;
+  }
+
+  /* Esc → close panels */
+  if (e.key === 'Escape') {
+    if (state._docPanelOpen || state._rulesPanelOpen) { UI.closeAll(); return; }
+  }
+
+  /* Phase 3: J / K / L navigation — only when no text field is focused and panels are closed */
+  if (state.view !== 'editor') return;
+  if (state._docPanelOpen || state._rulesPanelOpen) return;
+  const tag = document.activeElement?.tagName;
+  if (tag === 'TEXTAREA' || tag === 'INPUT') return;
+  if (doc && doc.activeId) return; /* don't navigate while editing */
+
+  if (e.key === 'j' || e.key === 'J') { e.preventDefault(); navigateSection(+1); return; }
+  if (e.key === 'k' || e.key === 'K') { e.preventDefault(); navigateSection(-1); return; }
+  if (e.key === 'l' || e.key === 'L') {
+    e.preventDefault();
+    if (!doc) return;
+    const idx = state.focusedIdx >= 0 ? state.focusedIdx : 0;
+    if (doc.sections[idx]) App.activateSection(doc.sections[idx].id);
+    return;
+  }
+});
+
+/* Phase 3: move keyboard focus between section blocks */
+function navigateSection(delta) {
+  const doc = Doc(); if (!doc || doc.sections.length === 0) return;
+  const total  = doc.sections.length;
+  const newIdx = Math.max(0, Math.min(total - 1, (state.focusedIdx < 0 ? (delta > 0 ? -1 : total) : state.focusedIdx) + delta));
+  state.focusedIdx = newIdx;
+
+  /* remove kb-focused from all, add to target */
+  const container = document.getElementById('sections-list');
+  container.querySelectorAll('.section-block').forEach((el, i) => {
+    el.classList.toggle('kb-focused', i === newIdx);
+  });
+
+  const target = container.querySelectorAll('.section-block')[newIdx];
+  if (target) {
+    target.focus({ preventScroll: true });
+    target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  updateCounter();
+}
+
+/* ════════════════════════════════════════════════════════════════
+   INIT
+════════════════════════════════════════════════════════════════ */
+function waitForLibs(cb) {
+  if (typeof Diff !== 'undefined' && typeof marked !== 'undefined') { cb(); return; }
+  let tries = 0;
+  const id = setInterval(() => {
+    tries++;
+    if (typeof Diff !== 'undefined' && typeof marked !== 'undefined') { clearInterval(id); cb(); }
+    else if (tries > 60) { clearInterval(id); cb(); /* proceed with degradation */ }
+  }, 80);
+}
+
+waitForLibs(function init() {
+  const restored = restoreState();
+  if (restored && state.currentDocId && state.documents[state.currentDocId]) {
+    const doc = Doc();
+    /* close any previously active section (UI state is transient) */
+    if (doc) { doc.activeId = null; }
+    switchView('editor');
+    toast('Session restored from last visit.');
+  } else if (restored && Object.keys(state.documents).length > 0) {
+    /* pick most recently updated */
+    const docs = Object.values(state.documents).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+    state.currentDocId = docs[0].id;
+    switchView('editor');
+    toast('Session restored from last visit.');
+  } else {
+    switchView('input');
+  }
+});
+</script>
+</body>
+</html>

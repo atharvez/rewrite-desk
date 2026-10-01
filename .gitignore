@@ -1,0 +1,14 @@
+# OS / editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# No build artefacts — this is a zero-build project
+# vendor/ is intentionally committed (vendored deps)
